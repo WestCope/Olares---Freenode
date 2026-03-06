@@ -1,0 +1,104 @@
+# SovereignNode Nebula Mesh — Node Template Config
+# Copy this file to /etc/nebula/config.yml on each node
+# Replace all <PLACEHOLDER> values with actual values
+
+pki:
+  # Path to the CA certificate (same for all nodes in the mesh)
+  ca: /etc/nebula/ca.crt
+  # Path to this node's certificate and key
+  cert: /etc/nebula/node.crt
+  key: /etc/nebula/node.key
+
+# Lighthouse nodes are well-known entry points into the mesh
+# They need a public IP or port-forwarded port
+static_host_map:
+  # Map nebula IP -> [real public IP:port] for lighthouse nodes
+  # "10.100.0.254": ["<LIGHTHOUSE_PUBLIC_IP>:4242"]
+
+lighthouse:
+  # Set to true ONLY on the lighthouse node
+  am_lighthouse: false
+  interval: 60
+  # List of lighthouse nebula IPs (for non-lighthouse nodes)
+  hosts:
+    - "10.100.0.254"
+
+listen:
+  host: 0.0.0.0
+  port: 4242
+
+punchy:
+  punch: true
+  respond: true
+  delay: "1s"
+
+relay:
+  # Enable relaying for nodes behind strict NAT
+  use_relays: true
+  relays:
+    - "10.100.0.254"
+
+tun:
+  disabled: false
+  dev: nebula1
+  drop_local_broadcast: false
+  drop_multicast: false
+  tx_queue: 500
+  mtu: 1300
+
+logging:
+  level: info
+  format: text
+
+# Firewall rules — customize per your needs
+firewall:
+  conntrack:
+    tcp_timeout: "12m"
+    udp_timeout: "3m"
+    default_timeout: "10m"
+
+  outbound:
+    # Allow all outbound traffic
+    - port: any
+      proto: any
+      host: any
+
+  inbound:
+    # Allow ICMP (ping) from any sovereign node
+    - port: any
+      proto: icmp
+      host: any
+
+    # SovereignNode dashboard
+    - port: 8080
+      proto: tcp
+      groups:
+        - sovereign-nodes
+
+    # Ollama AI API
+    - port: 11434
+      proto: tcp
+      groups:
+        - sovereign-nodes
+
+    # Mysterium DePIN API
+    - port: 4449
+      proto: tcp
+      groups:
+        - sovereign-nodes
+
+    # K3s/Kubernetes API (for clustering)
+    - port: 6443
+      proto: tcp
+      groups:
+        - sovereign-masters
+
+    # Proxmox cluster communication
+    - port: 5404
+      proto: udp
+      groups:
+        - sovereign-proxmox
+    - port: 5405
+      proto: udp
+      groups:
+        - sovereign-proxmox

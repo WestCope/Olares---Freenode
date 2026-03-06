@@ -1,0 +1,31 @@
+version: "3.9"
+# SovereignNode — Nebula Mesh Network
+# Creates an encrypted overlay network connecting all SovereignNodes
+# Reference: https://github.com/slackhq/nebula
+#
+# Usage:
+#   1. Generate certs: bash scripts/key-mgmt/generate-keys.sh
+#   2. Copy config template: cp poc/mesh-config/nebula-node-template.yml config.yml
+#   3. Edit config.yml with your node's details
+#   4. docker compose up -d
+
+services:
+  nebula:
+    image: nebulaoss/nebula:latest
+    container_name: sn-nebula
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "4242:4242/udp"   # Nebula P2P port
+    volumes:
+      - ${SOVEREIGN_DATA_PATH:-/opt/sovereign-node/data}/nebula:/etc/nebula:ro
+    network_mode: host
+    command: ["-config", "/etc/nebula/config.yml"]
+    healthcheck:
+      test: ["CMD-SHELL", "ping -c1 -W1 10.100.0.1 || true"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

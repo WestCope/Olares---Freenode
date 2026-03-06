@@ -1,0 +1,39 @@
+version: "3.9"
+# SovereignNode — Akash Network Provider
+# Earn AKT tokens by offering compute resources on the Akash marketplace
+# Reference: https://github.com/akash-network/node
+#
+# Requirements: Tier 2+ with publicly accessible IP, Kubernetes cluster
+
+services:
+  akash-provider:
+    image: ghcr.io/akash-network/provider:latest
+    container_name: sn-akash-provider
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+    environment:
+      - AKASH_HOME=/root/.akash
+      - AKASH_CHAIN_ID=akashnet-2
+      - AKASH_NODE=https://rpc.akash.network:443
+      - PROVIDER_ADDRESS=${AKASH_PROVIDER_ADDRESS}
+    volumes:
+      - akash-data:/root/.akash
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - depin-network
+    command: >
+      run
+      --cluster-k8s
+      --k8s-manifests=/manifests
+      --hostname=${AKASH_PROVIDER_HOST}
+      --bid-price-strategy=shellScript
+      --bid-price-script=/scripts/pricing.sh
+
+volumes:
+  akash-data:
+
+networks:
+  depin-network:
+    external: true
+    name: sovereign-internal

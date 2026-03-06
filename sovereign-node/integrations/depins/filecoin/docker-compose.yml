@@ -1,0 +1,70 @@
+version: "3.9"
+# SovereignNode — Filecoin Lotus Storage Provider
+# Earn FIL tokens by providing storage space on the Filecoin network
+# Reference: https://github.com/filecoin-project/lotus
+#
+# Requirements:
+#   - Tier 2 or higher (1 TB+ free storage)
+#   - Significant initial setup (sealing sectors takes time/compute)
+#   - See README.md for full setup instructions
+
+services:
+  lotus-daemon:
+    image: filecoin/lotus:latest
+    container_name: sn-lotus
+    restart: unless-stopped
+    ports:
+      - "1234:1234"   # JSON-RPC API
+      - "2345:2345"   # P2P
+    environment:
+      - LOTUS_PATH=/data/lotus
+      - LOTUS_STORAGE_PATH=/data/lotus-storage
+    volumes:
+      - lotus-data:/data/lotus
+      - lotus-storage:/data/lotus-storage
+      - /dev/hugepages:/dev/hugepages
+    command: daemon
+    ulimits:
+      nofile:
+        soft: 10000000
+        hard: 10000000
+    networks:
+      - depin-network
+
+  lotus-miner:
+    image: filecoin/lotus:latest
+    container_name: sn-lotus-miner
+    restart: unless-stopped
+    depends_on:
+      - lotus-daemon
+    environment:
+      - LOTUS_PATH=/data/lotus
+      - LOTUS_MINER_PATH=/data/lotus-miner
+    volumes:
+      - lotus-data:/data/lotus:ro
+      - lotus-miner-data:/data/lotus-miner
+      - lotus-storage:/data/lotus-storage
+    command: miner run
+    networks:
+      - depin-network
+
+volumes:
+  lotus-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${FILECOIN_DATA_PATH:-/opt/sovereign-node/data/filecoin/lotus}
+  lotus-storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${FILECOIN_STORAGE_PATH:-/opt/sovereign-node/data/filecoin/storage}
+  lotus-miner-data:
+    driver: local
+
+networks:
+  depin-network:
+    external: true
+    name: sovereign-internal

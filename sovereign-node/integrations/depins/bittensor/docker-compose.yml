@@ -1,0 +1,43 @@
+# SovereignNode — Bittensor Compute Subnet Integration
+# Reference: https://github.com/opentensor/bittensor
+#
+# Bittensor is a decentralized AI network where validators and miners
+# earn TAO tokens for contributing AI compute and data.
+
+version: "3.9"
+
+services:
+  bittensor-miner:
+    image: python:3.11-slim
+    container_name: sn-bittensor-miner
+    restart: unless-stopped
+    environment:
+      - WALLET_NAME=${BITTENSOR_WALLET_NAME:-sovereign}
+      - WALLET_HOTKEY=${BITTENSOR_HOTKEY:-default}
+      - NETUID=${BITTENSOR_NETUID:-1}        # Subnet UID (1 = text prompting)
+      - AXON_PORT=8091
+    ports:
+      - "8091:8091"
+    volumes:
+      - bittensor-wallet:/root/.bittensor
+      - ./miner.py:/app/miner.py:ro
+    command: >
+      bash -c "
+        pip install bittensor --quiet &&
+        python /app/miner.py
+          --wallet.name $${WALLET_NAME}
+          --wallet.hotkey $${WALLET_HOTKEY}
+          --netuid $${NETUID}
+          --axon.port 8091
+          --logging.debug
+      "
+    networks:
+      - depin-network
+
+volumes:
+  bittensor-wallet:
+
+networks:
+  depin-network:
+    external: true
+    name: sovereign-internal

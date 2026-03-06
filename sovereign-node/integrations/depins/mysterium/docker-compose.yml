@@ -1,0 +1,41 @@
+version: "3.9"
+# SovereignNode — Mysterium Network DePIN Container
+# Earn MYST tokens by providing VPN bandwidth
+# Reference: https://github.com/mysteriumnetwork/node
+#
+# Setup:
+#   1. Set MYSTERIUM_WALLET in your .env file
+#   2. docker compose up -d
+#   3. Visit http://localhost:4449/ui to complete onboarding
+#   4. Verify your node at https://mystnodes.com
+
+services:
+  mysterium-node:
+    image: mysteriumnetwork/myst:latest
+    container_name: sn-mysterium
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "4449:4449"         # Node API + WebUI
+      - "1194:1194/udp"     # OpenVPN
+      - "1194:1194/tcp"
+      - "4750:4750/udp"     # WireGuard
+    environment:
+      - CONFIG_DIR=/var/lib/mysterium-node
+    command: >
+      --log.level=info
+      service
+      --agreed-terms-and-conditions
+    volumes:
+      - mysterium-data:/var/lib/mysterium-node
+    networks:
+      - depin-network
+
+volumes:
+  mysterium-data:
+
+networks:
+  depin-network:
+    external: true
+    name: sovereign-internal

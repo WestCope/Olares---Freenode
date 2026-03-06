@@ -1,0 +1,46 @@
+# SovereignNode Ansible Inventory Template
+# Copy to hosts.yml and fill in your node details
+#
+# Usage: ansible-playbook -i inventory/hosts.yml playbooks/setup-tier1.yml
+
+all:
+  children:
+    sovereign_nodes:
+      hosts:
+        # ── Tier 1 nodes ──────────────────────────────────────────
+        node-min-01:
+          ansible_host: 192.168.1.10
+          ansible_user: sovereign
+          ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+          node_tier: min
+          location: home-office
+
+        # ── Tier 2 nodes ──────────────────────────────────────────
+        # node-medium-01:
+        #   ansible_host: 192.168.1.20
+        #   ansible_user: sovereign
+        #   node_tier: medium
+        #   location: home-rack
+
+        # ── Tier 3 nodes ──────────────────────────────────────────
+        # node-max-01:
+        #   ansible_host: 192.168.1.30
+        #   ansible_user: sovereign
+        #   node_tier: max
+        #   location: home-rack
+        #   gpu_enabled: true
+
+    # Proxmox cluster hosts (for proxmox-related plays)
+    proxmox_cluster:
+      hosts:
+        pve-01:
+          ansible_host: 192.168.1.10
+          ansible_user: root
+          node_tier: medium
+
+  vars:
+    # Global defaults
+    ansible_python_interpreter: /usr/bin/python3
+    ansible_ssh_extra_args: "-o StrictHostKeyChecking=accept-new"
+    sovereign_dir: /opt/sovereign-node
+    data_dir: "{{ sovereign_dir }}/data"

@@ -1,0 +1,68 @@
+---
+# SovereignNode Ansible — Backup Playbook
+# Runs Restic backup on all nodes
+# Usage: ansible-playbook -i inventory/hosts.yml playbooks/backup.yml
+
+- name: SovereignNode Backup
+  hosts: sovereign_nodes
+  become: true
+  gather_facts: false
+  vars:
+    sovereign_dir: /opt/sovereign-node
+    data_dir: "{{ sovereign_dir }}/data"
+
+  tasks:
+    - name: Check Restic is installed
+      command: which restic
+      changed_when: false
+      register: restic_check
+
+    - name: Install Restic if missing
+      apt:
+        name: restic
+        state: present
+      when: restic_check.rc != 0
+
+    - name: Initialize Restic repository (if not already initialized)
+      shell: restic init
+      environment:
+        RESTIC_REPOSITORY: "{{ lookup('env', 'RESTIC_REPOSITORY') }}"
+        RESTIC_PASSWORD: "{{ lookup('env', 'RESTIC_PASSWORD') }}"
+      failed_when: false  # Fails if already initialized (ok)
+      changed_when: false
+
+    - name: Run Restic backup
+      shell: >
+        restic backup
+        --verbose
+        --tag sovereign-node
+        --tag {{ inventory_hostname }}
+        {{ data_dir }}
+      environment:
+        RESTIC_REPOSITORY: "{{ lookup('env', 'RESTIC_REPOSITORY') }}"
+        RESTIC_PASSWORD: "{{ lookup('env', 'RESTIC_PASSWORD') }}"
+      register: backup_result
+
+    - name: Prune old snapshots
+      shell: >
+        restic forget
+        --keep-daily 7
+        --keep-weekly 4
+        --keep-monthly 6
+        --prune
+        --tag sovereign-node
+      environment:
+        RESTIC_REPOSITORY: "{{ lookup('env', 'RESTIC_REPOSITORY') }}"
+        RESTIC_PASSWORD: "{{ lookup('env', 'RESTIC_PASSWORD') }}"
+
+    - name: Check backup integrity
+      shell: restic check
+      environment:
+        RESTIC_REPOSITORY: "{{ lookup('env', 'RESTIC_REPOSITORY') }}"
+        RESTIC_PASSWORD: "{{ lookup('env', 'RESTIC_PASSWORD') }}"
+      failed_when: false
+
+    - name: Print backup summary
+      debug:
+        msg: "{{ backup_result.stdout_lines[-5:] }}"
+      when: backup_result.stdout_lines is defined

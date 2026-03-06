@@ -1,0 +1,86 @@
+version: "3.9"
+# SovereignNode — Sample DePIN Stack (POC)
+# Run with: docker compose -f poc/depin-compose.yml --env-file .env up -d
+#
+# Includes: Mysterium Network, sample Grass-compatible proxy, monitoring
+
+networks:
+  depin-net:
+    driver: bridge
+
+volumes:
+  mysterium-data:
+  node-exporter-data:
+
+services:
+  # ── Mysterium Network — VPN exit node ──────────────────────────
+  mysterium-node:
+    image: mysteriumnetwork/myst:latest
+    container_name: sn-mysterium
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "4449:4449"
+      - "1194:1194/udp"
+    environment:
+      - CONFIG_DIR=/var/lib/mysterium-node
+    command: >
+      --log-level=info
+      service
+      --agreed-terms-and-conditions
+    volumes:
+      - mysterium-data:/var/lib/mysterium-node
+    networks:
+      - depin-net
+    labels:
+      sovereign.depin: "mysterium"
+      sovereign.tier: "min"
+      sovereign.description: "Mysterium Network VPN exit node — earn MYST tokens"
+
+  # ── Monitoring: Prometheus + Grafana ───────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: sn-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=7d'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - depin-net
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: sn-node-exporter
+    restart: unless-stopped
+    pid: host
+    network_mode: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: sn-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-sovereign}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./monitoring/grafana-dashboards:/var/lib/grafana/dashboards:ro
+      - ./monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+    depends_on:
+      - prometheus
+    networks:
+      - depin-net

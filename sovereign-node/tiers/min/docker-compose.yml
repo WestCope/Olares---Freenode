@@ -1,0 +1,300 @@
+version: "3.9"
+
+# SovereignNode Tier 1 (MIN) — Docker Compose Stack
+# Usage: docker compose --env-file .env up -d
+#
+# Required .env variables:
+#   SOVEREIGN_DATA_PATH=/opt/sovereign-node/data
+#   NODE_HOSTNAME=sovereign-node
+#   NEXTCLOUD_ADMIN_USER=admin
+#   NEXTCLOUD_ADMIN_PASSWORD=<change-me>
+#   POSTGRES_PASSWORD=<change-me>
+#   GRASS_USERNAME=<your-grass-email>
+#   GRASS_PASSWORD=<your-grass-password>
+#   MYSTERIUM_WALLET=<your-eth-wallet>
+#   RESTIC_REPOSITORY=s3:s3.amazonaws.com/my-bucket
+#   RESTIC_PASSWORD=<strong-encryption-password>
+
+networks:
+  sovereign-internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  nextcloud-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${SOVEREIGN_DATA_PATH}/nextcloud
+  postgres-data:
+    driver: local
+  jellyfin-config:
+    driver: local
+  jellyfin-cache:
+    driver: local
+  ha-config:
+    driver: local
+  matrix-data:
+    driver: local
+  bitwarden-data:
+    driver: local
+  ollama-models:
+    driver: local
+  mysterium-data:
+    driver: local
+
+services:
+  # ─────────────────────────────────────────────────────────────
+  # Database (shared PostgreSQL)
+  # ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sovereign
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_MULTIPLE_DATABASES: nextcloud,matrix,bitwarden
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-scripts/create-databases.sh:/docker-entrypoint-initdb.d/create-databases.sh:ro
+    networks:
+      - sovereign-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sovereign"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    networks:
+      - sovereign-internal
+
+  # ─────────────────────────────────────────────────────────────
+  # Nextcloud — Self-hosted cloud storage
+  # ─────────────────────────────────────────────────────────────
+  nextcloud:
+    image: nextcloud:28-apache
+    restart: unless-stopped
+    ports:
+      - "8443:443"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: nextcloud
+      POSTGRES_USER: sovereign
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      NEXTCLOUD_ADMIN_USER: ${NEXTCLOUD_ADMIN_USER:-admin}
+      NEXTCLOUD_ADMIN_PASSWORD: ${NEXTCLOUD_ADMIN_PASSWORD}
+      NEXTCLOUD_TRUSTED_DOMAINS: "${NODE_HOSTNAME}.local localhost"
+      REDIS_HOST: redis
+    volumes:
+      - nextcloud-data:/var/www/html
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - sovereign-internal
+
+  # ─────────────────────────────────────────────────────────────
+  # Jellyfin — Media server
+  # ─────────────────────────────────────────────────────────────
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    restart: unless-stopped
+    ports:
+      - "8096:8096"
+    environment:
+      JELLYFIN_PublishedServerUrl: "http://${NODE_HOSTNAME}.local:8096"
+    volumes:
+      - jellyfin-config:/config
+      - jellyfin-cache:/cache
+      - ${SOVEREIGN_DATA_PATH}/media:/media:ro
+    networks:
+      - sovereign-internal
+    # Uncomment for Intel iGPU hardware transcoding:
+    # devices:
+    #   - /dev/dri:/dev/dri
+
+  # ─────────────────────────────────────────────────────────────
+  # Home Assistant — Smart home hub
+  # ─────────────────────────────────────────────────────────────
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+    volumes:
+      - ha-config:/config
+      - /etc/localtime:/etc/localtime:ro
+    network_mode: host  # Required for mDNS/Zigbee discovery
+    privileged: true
+
+  # ─────────────────────────────────────────────────────────────
+  # Matrix/Synapse — Encrypted chat server
+  # ─────────────────────────────────────────────────────────────
+  synapse:
+    image: matrixdotorg/synapse:latest
+    restart: unless-stopped
+    ports:
+      - "8448:8448"
+    environment:
+      SYNAPSE_SERVER_NAME: "${NODE_HOSTNAME}.local"
+      SYNAPSE_REPORT_STATS: "no"
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: matrix
+      POSTGRES_USER: sovereign
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - matrix-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sovereign-internal
+
+  # ─────────────────────────────────────────────────────────────
+  # Vaultwarden — Bitwarden-compatible password manager
+  # ─────────────────────────────────────────────────────────────
+  vaultwarden:
+    image: vaultwarden/server:latest
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    environment:
+      DATABASE_URL: "postgresql://sovereign:${POSTGRES_PASSWORD}@postgres/bitwarden"
+      ADMIN_TOKEN: ${VAULTWARDEN_ADMIN_TOKEN:-}
+      DOMAIN: "http://${NODE_HOSTNAME}.local:8081"
+      SIGNUPS_ALLOWED: "true"
+    volumes:
+      - bitwarden-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sovereign-internal
+
+  # ─────────────────────────────────────────────────────────────
+  # Ollama — Local LLM inference
+  # ─────────────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    networks:
+      - sovereign-internal
+    # Uncomment for GPU support (Tier 2/3):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  ollama-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    restart: unless-stopped
+    ports:
+      - "3001:8080"
+    environment:
+      OLLAMA_BASE_URL: "http://ollama:11434"
+    depends_on:
+      - ollama
+    networks:
+      - sovereign-internal
+
+  # ─────────────────────────────────────────────────────────────
+  # DePIN: Mysterium Network — VPN exit node earning
+  # ─────────────────────────────────────────────────────────────
+  mysterium-node:
+    image: mysteriumnetwork/myst:latest
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    environment:
+      MYST_CONFIG: |
+        payout.address: "${MYSTERIUM_WALLET}"
+        log.level: info
+    volumes:
+      - mysterium-data:/var/lib/mysterium-node
+    networks:
+      - sovereign-internal
+    ports:
+      - "4449:4449"  # API
+      - "1194:1194/udp"  # OpenVPN
+      - "1194:1194/tcp"
+
+  # ─────────────────────────────────────────────────────────────
+  # DePIN: Grass — Bandwidth sharing (residential proxy)
+  # Note: Grass requires a browser-based account. Use the Docker
+  # image from the community (see integrations/depins/grass/)
+  # ─────────────────────────────────────────────────────────────
+  grass-node:
+    image: ghcr.io/sovereignnode/grass-node:latest
+    restart: unless-stopped
+    environment:
+      GRASS_USERNAME: ${GRASS_USERNAME}
+      GRASS_PASSWORD: ${GRASS_PASSWORD}
+    networks:
+      - sovereign-internal
+    # Note: Grass requires residential (non-datacenter) IP
+
+  # ─────────────────────────────────────────────────────────────
+  # Mesh: Nebula — Overlay VPN
+  # ─────────────────────────────────────────────────────────────
+  nebula:
+    image: nebulaoss/nebula:latest
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ${SOVEREIGN_DATA_PATH}/nebula:/etc/nebula:ro
+    network_mode: host
+
+  # ─────────────────────────────────────────────────────────────
+  # SovereignNode Dashboard — Management UI
+  # ─────────────────────────────────────────────────────────────
+  sovereign-dashboard:
+    image: ghcr.io/sovereignnode/dashboard:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SOVEREIGN_DATA_PATH: /data
+      NODE_TIER: min
+      POSTGRES_URL: "postgresql://sovereign:${POSTGRES_PASSWORD}@postgres/sovereign"
+    volumes:
+      - ${SOVEREIGN_DATA_PATH}:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - postgres
+    networks:
+      - sovereign-internal
+
+  # ─────────────────────────────────────────────────────────────
+  # Backup: Restic — Encrypted cloud backups
+  # ─────────────────────────────────────────────────────────────
+  restic-backup:
+    image: mazzolino/restic:latest
+    restart: unless-stopped
+    environment:
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY}
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD}
+      BACKUP_CRON: "0 2 * * *"
+      RESTIC_BACKUP_SOURCES: /data
+      RESTIC_FORGET_ARGS: "--keep-daily 7 --keep-weekly 4 --keep-monthly 6"
+    volumes:
+      - ${SOVEREIGN_DATA_PATH}:/data:ro
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - sovereign-internal
