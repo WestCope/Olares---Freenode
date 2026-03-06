@@ -1,0 +1,226 @@
+---
+# SovereignNode Ansible — Tier 1 (MIN) Setup Playbook
+# Usage: ansible-playbook -i inventory/hosts.yml playbooks/setup-tier1.yml
+#        [--extra-vars "grass_username=user@example.com grass_password=secret mysterium_wallet=0xABC"]
+
+- name: SovereignNode Tier 1 Setup
+  hosts: sovereign_nodes
+  become: true
+  gather_facts: true
+  vars:
+    sovereign_dir: /opt/sovereign-node
+    data_dir: "{{ sovereign_dir }}/data"
+    sovereign_user: sovereign
+    node_tier: min
+    install_nextcloud: true
+    install_jellyfin: true
+    install_homeassistant: true
+    install_matrix: false   # Requires more RAM; disable on 8 GB nodes
+    install_vaultwarden: true
+    install_ollama: true
+    ollama_models:
+      - phi3:mini
+    enable_grass: true
+    enable_mysterium: true
+    enable_restic_backup: true
+    restic_schedule: "0 2 * * *"
+
+  pre_tasks:
+    - name: Verify minimum requirements
+      assert:
+        that:
+          - ansible_memtotal_mb >= 6144
+          - ansible_distribution in ['Ubuntu', 'Debian']
+        fail_msg: "Minimum 8 GB RAM required; Ubuntu or Debian only"
+
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+  tasks:
+    # ── System Setup ─────────────────────────────────────────────────────────
+    - name: Install system dependencies
+      apt:
+        name:
+          - curl
+          - wget
+          - git
+          - jq
+          - openssl
+          - ca-certificates
+          - gnupg
+          - restic
+          - python3-pip
+        state: present
+
+    - name: Create sovereign user
+      user:
+        name: "{{ sovereign_user }}"
+        groups: docker,sudo
+        shell: /bin/bash
+        create_home: true
+        system: false
+
+    - name: Create data directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ sovereign_user }}"
+        mode: "0750"
+      loop:
+        - "{{ data_dir }}"
+        - "{{ data_dir }}/nextcloud"
+        - "{{ data_dir }}/jellyfin"
+        - "{{ data_dir }}/homeassistant"
+        - "{{ data_dir }}/matrix"
+        - "{{ data_dir }}/bitwarden"
+        - "{{ data_dir }}/nebula"
+        - "{{ data_dir }}/mysterium"
+
+    # ── Docker ───────────────────────────────────────────────────────────────
+    - name: Install Docker
+      shell: curl -fsSL https://get.docker.com | bash
+      args:
+        creates: /usr/bin/docker
+
+    - name: Add sovereign user to docker group
+      user:
+        name: "{{ sovereign_user }}"
+        groups: docker
+        append: true
+
+    - name: Enable Docker service
+      systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    # ── K3s ─────────────────────────────────────────────────────────────────
+    - name: Install K3s
+      shell: curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644 --disable traefik --disable servicelb
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for K3s to be ready
+      shell: k3s kubectl get nodes
+      register: k3s_ready
+      until: k3s_ready.rc == 0
+      retries: 24
+      delay: 5
+
+    # ── Self-Hosted Services ─────────────────────────────────────────────────
+    - name: Copy Tier 1 Docker Compose
+      template:
+        src: ../tiers/min/docker-compose.yml
+        dest: "{{ sovereign_dir }}/docker-compose.yml"
+        owner: "{{ sovereign_user }}"
+        mode: "0640"
+
+    - name: Create .env file
+      template:
+        src: env.j2
+        dest: "{{ sovereign_dir }}/.env"
+        owner: "{{ sovereign_user }}"
+        mode: "0600"
+
+    - name: Start services
+      shell: docker compose up -d
+      args:
+        chdir: "{{ sovereign_dir }}"
+      become_user: "{{ sovereign_user }}"
+
+    # ── Ollama ───────────────────────────────────────────────────────────────
+    - name: Install Ollama
+      shell: curl -fsSL https://ollama.ai/install.sh | sh
+      args:
+        creates: /usr/local/bin/ollama
+      when: install_ollama
+
+    - name: Enable Ollama service
+      systemd:
+        name: ollama
+        enabled: true
+        state: started
+      when: install_ollama
+
+    - name: Pull Ollama models
+      shell: ollama pull {{ item }}
+      loop: "{{ ollama_models }}"
+      when: install_ollama
+      register: ollama_pull
+      failed_when: false
+
+    # ── Nebula Mesh ──────────────────────────────────────────────────────────
+    - name: Install Nebula
+      get_url:
+        url: "https://github.com/slackhq/nebula/releases/download/v1.9.0/nebula-linux-amd64.tar.gz"
+        dest: /tmp/nebula.tar.gz
+        mode: "0644"
+      register: nebula_download
+      failed_when: false
+
+    - name: Extract Nebula
+      unarchive:
+        src: /tmp/nebula.tar.gz
+        dest: /usr/local/bin/
+        remote_src: true
+        include:
+          - nebula
+          - nebula-cert
+      when: nebula_download is succeeded
+
+    # ── SovereignNode Dashboard ──────────────────────────────────────────────
+    - name: Copy dashboard files
+      copy:
+        src: ../dashboard/
+        dest: "{{ sovereign_dir }}/dashboard/"
+        owner: "{{ sovereign_user }}"
+        mode: preserve
+
+    - name: Install dashboard Python dependencies
+      pip:
+        requirements: "{{ sovereign_dir }}/dashboard/requirements.txt"
+        executable: pip3
+
+    - name: Create dashboard systemd service
+      copy:
+        content: |
+          [Unit]
+          Description=SovereignNode Dashboard
+          After=network.target
+
+          [Service]
+          Type=simple
+          User={{ sovereign_user }}
+          WorkingDirectory={{ sovereign_dir }}/dashboard
+          Environment="NODE_TIER={{ node_tier }}"
+          Environment="SOVEREIGN_DATA_PATH={{ data_dir }}"
+          ExecStart=/usr/bin/python3 app.py
+          Restart=on-failure
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/sovereign-dashboard.service
+        mode: "0644"
+
+    - name: Enable and start dashboard
+      systemd:
+        name: sovereign-dashboard
+        daemon_reload: true
+        enabled: true
+        state: started
+
+  post_tasks:
+    - name: Print completion summary
+      debug:
+        msg: |
+          ════════════════════════════════════════
+          SovereignNode Tier 1 Setup Complete!
+          ════════════════════════════════════════
+          Node IP: {{ ansible_default_ipv4.address }}
+          Dashboard: http://{{ ansible_default_ipv4.address }}:8080
+          Nextcloud: http://{{ ansible_default_ipv4.address }}:8443
+          Jellyfin:  http://{{ ansible_default_ipv4.address }}:8096
+          ════════════════════════════════════════

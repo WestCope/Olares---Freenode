@@ -1,0 +1,81 @@
+version: "3.9"
+# SovereignNode — Ollama Distributed AI Compute
+# Enables sharing AI inference capacity across the mesh network
+# Reference: https://github.com/jmorganca/ollama
+
+services:
+  # ── Ollama inference server ───────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sn-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    networks:
+      - ai-network
+    # ── Uncomment for GPU support (Tier 2/3) ──
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ── Open WebUI — Web interface ────────────────────────────────────────────
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: sn-open-webui
+    restart: unless-stopped
+    ports:
+      - "3001:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-change-me-in-production}
+    volumes:
+      - webui-data:/app/backend/data
+    depends_on:
+      - ollama
+    networks:
+      - ai-network
+
+  # ── Distributed compute relay ─────────────────────────────────────────────
+  # Accepts AI inference jobs from low-power nodes in the mesh
+  # and routes them to local Ollama or forwards to higher-tier nodes
+  sovereign-ai-relay:
+    image: python:3.12-slim
+    container_name: sn-ai-relay
+    restart: unless-stopped
+    ports:
+      - "11435:11435"   # Relay API (compatible with Ollama API format)
+    environment:
+      - LOCAL_OLLAMA_URL=http://ollama:11434
+      - NODE_TIER=${NODE_TIER:-min}
+      - RELAY_PORT=11435
+    command: >
+      bash -c "
+        pip install fastapi uvicorn httpx --quiet &&
+        python /relay/main.py
+      "
+    volumes:
+      - ./relay:/relay:ro
+    depends_on:
+      - ollama
+    networks:
+      - ai-network
+
+volumes:
+  ollama-models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${SOVEREIGN_DATA_PATH:-/opt/sovereign-node/data}/ollama
+  webui-data:
+
+networks:
+  ai-network:
+    external: true
+    name: sovereign-internal

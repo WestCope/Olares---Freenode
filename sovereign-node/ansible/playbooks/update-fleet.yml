@@ -1,0 +1,62 @@
+---
+# SovereignNode Ansible — Fleet Update Playbook
+# Updates all SovereignNode components across all nodes
+# Usage: ansible-playbook -i inventory/hosts.yml playbooks/update-fleet.yml
+
+- name: SovereignNode Fleet Update
+  hosts: sovereign_nodes
+  become: true
+  serial: 1  # Update one node at a time to avoid downtime
+  gather_facts: true
+  vars:
+    sovereign_dir: /opt/sovereign-node
+
+  tasks:
+    - name: Update system packages
+      apt:
+        upgrade: safe
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Pull latest Docker images
+      shell: docker compose pull
+      args:
+        chdir: "{{ sovereign_dir }}"
+      failed_when: false
+
+    - name: Restart updated containers
+      shell: docker compose up -d
+      args:
+        chdir: "{{ sovereign_dir }}"
+
+    - name: Update Ollama
+      shell: curl -fsSL https://ollama.ai/install.sh | sh
+      args:
+        warn: false
+      failed_when: false
+
+    - name: Restart Ollama
+      systemd:
+        name: ollama
+        state: restarted
+      failed_when: false
+
+    - name: Update SovereignNode dashboard
+      git:
+        repo: "https://github.com/WestCope/Olares---Freenode.git"
+        dest: /tmp/sovereign-update
+        single_branch: true
+        version: main
+        depth: 1
+      failed_when: false
+
+    - name: Restart dashboard
+      systemd:
+        name: sovereign-dashboard
+        state: restarted
+      failed_when: false
+
+    - name: Clean up old Docker images
+      shell: docker image prune -f
+      failed_when: false

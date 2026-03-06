@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SovereignNode — Dashboard</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+  <div class="layout">
+    <!-- Sidebar Navigation -->
+    <nav class="sidebar">
+      <div class="sidebar-logo">
+        <span class="logo-primary">Sovereign</span><span class="logo-accent">Node</span>
+      </div>
+      <ul class="nav-links">
+        <li class="nav-item active"><a href="/">📊 Dashboard</a></li>
+        <li class="nav-item"><a href="/apps">📦 Apps</a></li>
+        <li class="nav-item"><a href="/earnings">💰 Earnings</a></li>
+        <li class="nav-item"><a href="/ai">🤖 AI</a></li>
+        <li class="nav-item"><a href="/mesh">🌐 Mesh</a></li>
+        <li class="nav-item"><a href="/settings">⚙️ Settings</a></li>
+      </ul>
+      <div class="sidebar-tier">
+        Tier: <span class="tier-badge tier-{{ tier }}">{{ tier.upper() }}</span>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Header -->
+      <header class="page-header">
+        <div>
+          <h1 class="page-title">Dashboard</h1>
+          <p class="page-subtitle">Your sovereign infrastructure at a glance</p>
+        </div>
+        <div class="header-status">
+          <span class="status-dot status-online"></span>
+          Node Online
+        </div>
+      </header>
+
+      <!-- System Metrics Grid -->
+      <section class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">CPU Usage</div>
+          <div class="metric-value">{{ system.cpu_percent }}%</div>
+          <div class="metric-sub">{{ system.cpu_count }} cores</div>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: {{ system.cpu_percent }}%"></div>
+          </div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Memory</div>
+          <div class="metric-value">{{ system.memory_used_gb }} GB</div>
+          <div class="metric-sub">of {{ system.memory_total_gb }} GB</div>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: {{ system.memory_percent }}%"></div>
+          </div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Disk Usage</div>
+          <div class="metric-value">{{ system.disk_percent }}%</div>
+          <div class="metric-sub">{{ system.disk_free_gb }} GB free</div>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: {{ system.disk_percent }}%"></div>
+          </div>
+        </div>
+        <div class="metric-card metric-card--earn">
+          <div class="metric-label">DePIN Status</div>
+          <div class="metric-value earn-value">
+            {{ depin_nodes | selectattr('status', 'equalto', 'running') | list | length }}
+            <span class="metric-value-small">/ {{ depin_nodes | length }}</span>
+          </div>
+          <div class="metric-sub">nodes active</div>
+        </div>
+      </section>
+
+      <!-- Services Section -->
+      <section class="section">
+        <div class="section-header">
+          <h2 class="section-title">📦 Services</h2>
+          <a href="/apps" class="btn btn-secondary btn-sm">Manage All</a>
+        </div>
+        <div class="services-grid">
+          {% for svc in services %}
+          <div class="service-card service-card--{{ svc.status }}">
+            <div class="service-icon">{{ svc.icon }}</div>
+            <div class="service-info">
+              <div class="service-name">{{ svc.name }}</div>
+              <div class="service-status status-{{ svc.status }}">● {{ svc.status }}</div>
+            </div>
+            {% if svc.url %}
+            <a href="{{ svc.url }}" target="_blank" rel="noopener noreferrer">
+              <button class="btn btn-primary btn-xs">Open</button>
+            </a>
+            {% else %}
+            <button class="btn btn-secondary btn-xs" disabled>Stopped</button>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <!-- DePIN Earning Section -->
+      <section class="section">
+        <div class="section-header">
+          <h2 class="section-title">💰 DePIN Nodes</h2>
+          <a href="/earnings" class="btn btn-secondary btn-sm">Details</a>
+        </div>
+        <div class="depin-grid">
+          {% for node in depin_nodes %}
+          <div class="depin-card">
+            <span class="depin-icon">{{ node.icon }}</span>
+            <div class="depin-info">
+              <div class="depin-name">{{ node.name }}</div>
+              <div class="depin-type">{{ node.type }}</div>
+            </div>
+            <div class="depin-status-badge status-{{ node.status }}">
+              {{ node.status }}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <!-- AI Models -->
+      {% if ollama_models %}
+      <section class="section">
+        <div class="section-header">
+          <h2 class="section-title">🤖 AI Models</h2>
+          <a href="/ai" class="btn btn-secondary btn-sm">Manage</a>
+        </div>
+        <div class="models-list">
+          {% for model in ollama_models %}
+          <div class="model-item">
+            <span class="model-name">{{ model.name }}</span>
+            <span class="model-size">
+              {{ (model.size / 1024 / 1024 / 1024) | round(1) }} GB
+            </span>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+    </main>
+  </div>
+  <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+version: "3.9"
+# SovereignNode — Netbird WireGuard Mesh
+# Zero-config peer-to-peer VPN using WireGuard
+# Reference: https://github.com/netbirdio/netbird
+#
+# Usage:
+#   1. Create account at https://app.netbird.io (or self-host management server)
+#   2. Get setup key from dashboard
+#   3. Set NETBIRD_SETUP_KEY in .env
+#   4. docker compose up -d
+
+services:
+  netbird:
+    image: netbirdio/netbird:latest
+    container_name: sn-netbird
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - NB_SETUP_KEY=${NETBIRD_SETUP_KEY}
+      - NB_MANAGEMENT_URL=${NETBIRD_MANAGEMENT_URL:-https://api.netbird.io}
+    volumes:
+      - netbird-data:/etc/netbird
+    network_mode: host
+    command: up
+
+volumes:
+  netbird-data:
