@@ -28,6 +28,21 @@ install-wizard-*.tar.gz
 olares-cli-*.tar.gz
 !ks-console-*.tgz
 .vscode
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# SovereignNode runtime files
+sovereign-node/.env
+sovereign-node/**/.env
+sovereign-node/**/node_modules/
+sovereign-node/target/
 .DS_Store
 cli/output
 daemon/output
